@@ -1,6 +1,7 @@
 import json
 import asyncio
 import logging
+from hashlib import md5
 from pathlib import Path
 from functools import partial
 from urllib.parse import urljoin
@@ -145,11 +146,12 @@ async def upload_resource(ia_id, ia_metadata, p_file, extra_md):
     r = await loop.run_in_executor(None, func)
     logging.info(f"Uploaded {ia_id} to ia")
 
-    # clean up
+    with p_file.open("rb") as f:
+        file_hash = md5()
+        while chunk := f.read(8192):
+            file_hash.update(chunk)
 
-    file_hash = "nobodyexpect"
-
-    # remove local file
+    file_hash = file_hash.hexdigest()
     p_file.unlink()
 
     return {"ia_id": ia_id,
