@@ -1,6 +1,7 @@
 import json
 import asyncio
 from pathlib import Path
+from functools import partial
 from urllib.parse import urljoin
 from inspect import isasyncgenfunction
 
@@ -8,7 +9,7 @@ from inspect import isasyncgenfunction
 from pprint import pprint
 
 import httpx
-from internetarchive import upload
+import internetarchive
 
 
 class CkanCrawler:
@@ -16,13 +17,18 @@ class CkanCrawler:
         # TODO: try the base url
         self.base_url = base_url
         # TODO: check valid portal_name (solo letras/numeros . - _)
+        # Esto va a ser un nombre del dir tambien, que sea lindo sin espacios
+        # y que arranque con una letra por las dudas
         self.portal_name = portal_name
         self.client = httpx.AsyncClient()
 
         # TODO: put this in a folder with the name of the portal
-        self.p_files = Path("files")
-        self.p_metadata = Path("metadata")
+        self.p_base = Path(self.portal_name)
+        self.p_items_md = self.p_base / "items_metadata.json"
+        self.p_files = self.p_base / "files"
+        self.p_metadata = self.p_base / "metadata"
 
+        self.p_base.mkdir(exist_ok=True)
         self.p_files.mkdir(exist_ok=True)
         self.p_metadata.mkdir(exist_ok=True)
 
@@ -76,8 +82,11 @@ class CkanCrawler:
 
             yield {"resource": resource, "package_name": metadata["name"]}
 
-    async def download_upload_resource(self, resource, package_name):
+    async def download_resource(self, resource, package_name):
         """Save a resource to disk."""
+
+        # TODO: break this funcion in more modular and tiny funcions
+
         # resource_id = resource["id"]
         resource_url = resource["url"]
 
@@ -96,7 +105,14 @@ class CkanCrawler:
 
         # TODO: tirarlo en un async thread nuevo
         # TODO: asegurarse que sea menor a 100 caracteres (por lo menos tirar warning)
-        print("subiendo a ia")
+
+        ia_id, md = await self._create_ia_metadata(resource)
+        return {"ia_id": ia_id, "ia_metadata": md, "p_file": p_file, "extra_md": {}}
+
+        # TODO: escribir archivo final con la metadata (id archivo, md5, id ai, tal vez resource-name y package-name)
+        # TODO: borrar archivo una vez bajado
+
+    async def _create_ia_metadata(self, resource):
         description = resource["description"]
 
         table = resource.get("attributesDescription")
@@ -114,12 +130,17 @@ class CkanCrawler:
         )
 
         ia_id = f"{self.portal_name}_{resource['id']}"
+        return ia_id, md
 
-        r = upload(ia_id, files=[str(p_file)], metadata=md)
-        print(f"upload a ai: {r[0].status_code}")
-        # TODO: escribir archivo final con la metadata (id archivo, md5, id ai, tal vez resource-name y package-name)
-        # TODO: mover la logica de ia afuera del scraper
-        # TODO: borrar archivo una vez bajado
+
+async def upload_resource(ia_id, ia_metadata, p_file, extra_md):
+    # TODO: leer las cred de variable de entorno
+    # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
+    print("subiendo a ia")
+    func = partial(internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata)
+    loop = asyncio.get_running_loop()
+    r = await loop.run_in_executor(None, func)
+    print(f"upload a ai: {r[0].status_code}")
 
 
 async def create_worker(function, queue_in, queue_out=None):
@@ -169,6 +190,7 @@ async def main():
     queue_packages = asyncio.Queue()
     queue_metadata = asyncio.Queue(maxsize=maxsize)
     queue_resources = asyncio.Queue(maxsize=maxsize)
+    queue_uploads = asyncio.Queue(maxsize=maxsize)
 
     base_url = "https://data.buenosaires.gob.ar/"
     portal_name = "buenos_aires_data"
@@ -189,10 +211,11 @@ async def main():
 
     functions = [crawler.get_package_metadata,
                  crawler.process_package,
-                 crawler.download_upload_resource]
-    queues_in = [queue_packages, queue_metadata, queue_resources]
-    queues_out = [queue_metadata, queue_resources, None]
-    workers_names = ["package", "metadata", "resources"]
+                 crawler.download_resource,
+                 upload_resource]
+    queues_in = [queue_packages, queue_metadata, queue_resources, queue_uploads]
+    queues_out = [queue_metadata, queue_resources, queue_uploads, None]
+    workers_names = ["package", "metadata", "resources", "upload"]
     # Start all the workers
     for func, queue_in, queue_out, workers_name in zip(functions, queues_in,
                                                        queues_out, workers_names):
@@ -234,7 +257,10 @@ async def dev_main():
     print(f"{metadata!r}")
     package_name = metadata["name"]
     resource = metadata["resources"][0]
-    await crawler.download_upload_resource(resource, package_name)
+    result = await crawler.download_resource(resource, package_name)
+    print("result:")
+    pprint(result)
+    await upload_resource(**result)
 
     # cerramos el cliente
     await crawler.client.aclose()
