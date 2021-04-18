@@ -1,12 +1,13 @@
 import json
 import asyncio
+import logging
 from pathlib import Path
 from functools import partial
 from urllib.parse import urljoin
 from inspect import isasyncgenfunction
 
 # temp imports
-from pprint import pprint
+# from pprint import pprint
 
 import httpx
 import internetarchive
@@ -47,6 +48,7 @@ class CkanCrawler:
         # assert success == True in json
         r_json = r.json()
         packages_list = r_json["result"]
+        logging.info(f"Downloaded package list with {len(packages_list)} packages")
         return {"packages_list": packages_list}
 
     async def get_package_metadata(self, package_id, save=True):
@@ -63,13 +65,12 @@ class CkanCrawler:
             with (self.p_metadata / f"{package_id}.json").open("w") as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
 
+        logging.info(f"Downloaded metadata for package {package_id}")
         return {"metadata": metadata}
 
     async def process_package(self, metadata):
         # read the package metada and iter for all resources
         for resource in metadata["resources"]:
-            print(f"processing package {metadata['name']}, {resource['name']}")
-
             # check valid format
             if resource["format"].lower() not in self.valid_formats:
                 continue
@@ -79,7 +80,7 @@ class CkanCrawler:
 
             # TODO
             # check if was updated
-
+            logging.info(f"Procesed resource {resource['name']} from package {metadata['name']}")
             yield {"resource": resource, "package_name": metadata["name"]}
 
     async def download_resource(self, resource, package_name):
@@ -95,8 +96,6 @@ class CkanCrawler:
         p_download.mkdir(exist_ok=True)
         p_file = p_download / resource_url.rsplit("/", maxsplit=1)[-1]
 
-        print(f"Downloading {p_file}, {resource_url}")
-
         # TODO: add retry (with transport)
         with p_file.open("wb") as f:
             async with self.client.stream("GET", resource_url) as response:
@@ -107,6 +106,7 @@ class CkanCrawler:
         # TODO: asegurarse que sea menor a 100 caracteres (por lo menos tirar warning)
 
         ia_id, md = await self._create_ia_metadata(resource)
+        logging.info(f"Downloaded file for resource {resource['name']} from package {package_name}")
         return {"ia_id": ia_id, "ia_metadata": md, "p_file": p_file, "extra_md": {}}
 
         # TODO: escribir archivo final con la metadata (id archivo, md5, id ai, tal vez resource-name y package-name)
@@ -130,17 +130,20 @@ class CkanCrawler:
         )
 
         ia_id = f"{self.portal_name}_{resource['id']}"
+        if len(ia_id) >= 100:
+            logging.warning(f"ia_id too long for resource {resource['name']} (max len == 100)")
+
         return ia_id, md
 
 
 async def upload_resource(ia_id, ia_metadata, p_file, extra_md):
     # TODO: leer las cred de variable de entorno
+    # TODO: mirar si falla, reintentar si falla
     # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
-    print("subiendo a ia")
     func = partial(internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata)
     loop = asyncio.get_running_loop()
     r = await loop.run_in_executor(None, func)
-    print(f"upload a ai: {r[0].status_code}")
+    logging.info(f"Uploaded {ia_id} to ia")
 
 
 async def create_worker(function, queue_in, queue_out=None):
@@ -148,27 +151,21 @@ async def create_worker(function, queue_in, queue_out=None):
     queue_in with function and put it in queue_out"""
     while True:
         item_in = await queue_in.get()
-        print(f"in: {function.__name__}")
-        print(f"{item_in=}")
         # log get new item_in
 
         if not item_in:
-            print("ultimo item! hora de matar al workier!")
             # no more items, put stop signal for next worker
             if queue_out:
                 await queue_out.put(None)
 
             break
 
-        print(f"{function.__name__}, {isasyncgenfunction(function)=}")
         if isasyncgenfunction(function):
-            print("is generator ->", function.__name__)
             async for item_out in function(**item_in):
                 if queue_out:
                     await queue_out.put(item_out)
 
         else:
-            print("normal function ->", function.__name__)
             item_out = await function(**item_in)
             if queue_out:
                 await queue_out.put(item_out)
@@ -230,8 +227,8 @@ async def main():
     # upload item to internet archive (ia)
 
     # save new metadata
-    all_taks = workers["package"] + workers["metadata"] + workers["resources"]
-    await asyncio.gather(*all_taks)
+    all_tasks = [value for values in workers.values() for value in values]
+    await asyncio.gather(*all_tasks)
 
     # cerramos el cliente
     await crawler.client.aclose()
@@ -246,26 +243,27 @@ async def dev_main():
 
     result = await crawler.get_package_list()
     r = result["packages_list"]
-    print(f"{len(r)=}, {r[10]=}")
+    # print(f"{len(r)=}, {r[10]=}")
     package_id = r[10]  # actuaciones-fiscalizacion
     package_id = "bocas-subte"
     metadata = await crawler.get_package_metadata(package_id)
     metadata = metadata["metadata"]
-    pprint(metadata)
+    # pprint(metadata)
 
-    print("raw metadata:")
-    print(f"{metadata!r}")
+    # print("raw metadata:")
+    # print(f"{metadata!r}")
     package_name = metadata["name"]
     resource = metadata["resources"][0]
     result = await crawler.download_resource(resource, package_name)
-    print("result:")
-    pprint(result)
+    # print("result:")
+    # pprint(result)
     await upload_resource(**result)
 
     # cerramos el cliente
     await crawler.client.aclose()
 
 if __name__ == "__main__":
+    logging.basicConfig(filename='opa.log', encoding='utf-8', level=logging.INFO)
     print("start")
     asyncio.run(dev_main())
     print("end")
