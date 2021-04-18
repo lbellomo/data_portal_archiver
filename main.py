@@ -24,7 +24,6 @@ class CkanCrawler:
         self.portal_name = portal_name
         self.client = httpx.AsyncClient()
 
-        # TODO: put this in a folder with the name of the portal
         self.p_base = Path(self.portal_name)
         self.p_items_md = self.p_base / "items_metadata.json"
         self.p_files = self.p_base / "files"
@@ -52,7 +51,7 @@ class CkanCrawler:
         logging.info(f"Downloaded package list with {len(packages_list)} packages")
         return {"packages_list": packages_list}
 
-    async def get_package_metadata(self, package_id, save=True):
+    async def get_package_metadata(self, package_id):
         """Get the metadata from an package."""
         r = await self.client.get(self.url_package_show, params={"id": package_id})
         # TODO
@@ -61,15 +60,15 @@ class CkanCrawler:
         r_json = r.json()
         metadata = r_json["result"]
 
-        if save:
-            # TODO: do with aiofiles
-            with (self.p_metadata / f"{package_id}.json").open("w") as f:
-                json.dump(metadata, f, ensure_ascii=False, indent=2, sort_keys=True)
-
         logging.info(f"Downloaded metadata for package {package_id}")
         return {"metadata": metadata}
 
     async def process_package(self, metadata):
+        # read old md if any
+        save_metadata = False
+        package_id = metadata["name"]
+        p_package_md = self.p_metadata / f"{package_id}.json"
+
         # read the package metada and iter for all resources
         for resource in metadata["resources"]:
             # check valid format
@@ -78,11 +77,20 @@ class CkanCrawler:
 
             # TODO
             # check old metadata for that resource exist
+            # old_metadata =
+            # if change: save_metadata = True
 
             # TODO
             # check if was updated
             logging.info(f"Procesed resource {resource['name']} from package {metadata['name']}")
             yield {"resource": resource, "package_name": metadata["name"]}
+
+        # if any resource change, write new metadata
+        if save_metadata:
+            # TODO: do with aiofiles
+            with p_package_md.open("w") as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2, sort_keys=True)
+            logging.info(f"Saved metadata for resource {package_id}")
 
     async def download_resource(self, resource, package_name):
         """Save a resource to disk."""
