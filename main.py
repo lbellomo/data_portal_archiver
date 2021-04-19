@@ -22,7 +22,7 @@ class CkanCrawler:
         # Esto va a ser un nombre del dir tambien, que sea lindo sin espacios
         # y que arranque con una letra por las dudas
         self.portal_name = portal_name
-        self.client = httpx.AsyncClient()
+        self.client = httpx.AsyncClient(transport=httpx.HTTPTransport(retries=10))
 
         self.p_base = Path(self.portal_name)
         self.p_items_md = self.p_base / "items_metadata.json"
@@ -41,11 +41,14 @@ class CkanCrawler:
 
     async def get_package_list(self):
         """Get a list of all packages ids"""
-        print("bajando package list")
-        r = await self.client.get(self.url_package_list)
-        # TODO
-        # assert 200
-        # assert success == True in json
+        try:
+            r = await self.client.get(self.url_package_list)
+            r.raise_for_status()
+        except httpx.RequestError as exc:
+            logging.error(f"An error occurred while requesting {exc.request.url!r}.")
+        except httpx.HTTPStatusError as exc:
+            logging.error(f"Error response {exc.response.status_code} while requesting {exc.request.url!r}.")
+
         r_json = r.json()
         packages_list = r_json["result"]
         logging.info(f"Downloaded package list with {len(packages_list)} packages")
@@ -53,10 +56,14 @@ class CkanCrawler:
 
     async def get_package_metadata(self, package_id):
         """Get the metadata from an package."""
-        r = await self.client.get(self.url_package_show, params={"id": package_id})
-        # TODO
-        # assert 200
-        # assert success == True in json
+        try:
+            r = await self.client.get(self.url_package_show, params={"id": package_id})
+            r.raise_for_status()
+        except httpx.RequestError as exc:
+            logging.error(f"An error occurred while requesting {exc.request.url!r}.")
+        except httpx.HTTPStatusError as exc:
+            logging.error(f"Error response {exc.response.status_code} while requesting {exc.request.url!r}.")
+
         r_json = r.json()
         metadata = r_json["result"]
 
@@ -64,10 +71,12 @@ class CkanCrawler:
         return {"metadata": metadata}
 
     async def process_package(self, metadata):
-        # read old md if any
         save_metadata = False
         package_id = metadata["name"]
         p_package_md = self.p_metadata / f"{package_id}.json"
+
+        # check for old md if any
+        
 
         # read the package metada and iter for all resources
         for resource in metadata["resources"]:
@@ -217,12 +226,12 @@ async def create_worker(function, queue_in, queue_out=None):
 
         if isasyncgenfunction(function):
             async for item_out in function(**item_in):
-                if queue_out:
+                if item_out and queue_out:
                     await queue_out.put(item_out)
 
         else:
             item_out = await function(**item_in)
-            if queue_out:
+            if item_out and queue_out:
                 await queue_out.put(item_out)
 
         # log new item_out
