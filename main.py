@@ -1,3 +1,4 @@
+import os
 import json
 import asyncio
 import logging
@@ -47,7 +48,9 @@ class CkanCrawler:
         except httpx.RequestError as exc:
             logging.error(f"An error occurred while requesting {exc.request.url!r}.")
         except httpx.HTTPStatusError as exc:
-            logging.error(f"Error response {exc.response.status_code} while requesting {exc.request.url!r}.")
+            logging.error(
+                f"Error response {exc.response.status_code}"
+                "while requesting {exc.request.url!r}.")
 
         r_json = r.json()
         packages_list = r_json["result"]
@@ -163,6 +166,14 @@ class IaUploader:
         self.count_workers = count_workers
         self.p_internal_md = Path(self.portal_name) / "internal_metadata.json"
 
+        ia_access_key = os.environ.get("ia_access_key")
+        ia_secret_key = os.environ.get("ia_secret_key")
+        if not (ia_access_key and ia_secret_key):
+            raise ValueError("Internet Archive acces_key or secret_key missing")
+
+        self.ia_access_key = ia_access_key
+        self.ia_secret_key = ia_secret_key
+
         if self.p_internal_md.exists():
             old_md = json.load(self.p_internal_md.open())
             self.know_hashes = set(i["file_hash"] for i in old_md)
@@ -182,10 +193,11 @@ class IaUploader:
             p_file.unlink()
             return
 
-        # TODO: leer las cred de variable de entorno
         # TODO: mirar si falla, reintentar si falla
         # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
-        func_upload = partial(internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata)
+        func_upload = partial(
+            internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata,
+            access_key=self.ia_access_key, secret_key=self.ia_secret_key)
         r = await loop.run_in_executor(None, func_upload)
         logging.info(f"Uploaded {ia_id} to ia")
 
@@ -337,33 +349,6 @@ async def main():
     await crawler.client.aclose()
 
     print("---\nEND MAIN\n---")
-
-
-async def dev_main():
-    base_url = "https://data.buenosaires.gob.ar/"
-    portal_name = "buenos_aires_data"
-    crawler = CkanCrawler(base_url, portal_name)
-
-    result = await crawler.get_package_list()
-    r = result["packages_list"]
-    # print(f"{len(r)=}, {r[10]=}")
-    package_id = r[10]  # actuaciones-fiscalizacion
-    package_id = "bocas-subte"
-    metadata = await crawler.get_package_metadata(package_id)
-    metadata = metadata["metadata"]
-    # pprint(metadata)
-
-    # print("raw metadata:")
-    # print(f"{metadata!r}")
-    package_name = metadata["name"]
-    resource = metadata["resources"][0]
-    result = await crawler.download_resource(resource, package_name)
-    # print("result:")
-    # pprint(result)
-    await upload_resource(**result)
-
-    # cerramos el cliente
-    await crawler.client.aclose()
 
 if __name__ == "__main__":
     logging.basicConfig(encoding='utf-8', level=logging.INFO)
