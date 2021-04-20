@@ -7,6 +7,7 @@ from pathlib import Path
 from functools import partial
 from urllib.parse import urljoin
 from inspect import isasyncgenfunction
+from concurrent.futures import ThreadPoolExecutor
 
 # temp imports
 # from pprint import pprint
@@ -133,14 +134,15 @@ class CkanCrawler:
     async def _create_ia_metadata(self, resource):
         description = resource["description"]
 
-        table = resource.get("attributesDescription")
-        if table:
-            table = json.loads(table)
-            pretty_table = [
-                f"{attr['title']} [{attr['type']}]: {attr['description']}"
-                for attr in table]
+        # TODO: fix this (attributes have missing keys or another formats)
+        # table = resource.get("attributesDescription")
+        # if table:
+        #     table = json.loads(table)
+        #     pretty_table = [
+        #         f"{attr['title']} [{attr['type']}]: {attr['description']}"
+        #         for attr in table]
 
-            description += "\n" + "\n - " + "\n - ".join(pretty_table)
+        #     description += "\n" + "\n - " + "\n - ".join(pretty_table)
 
         md = dict(
             title=resource["name"],
@@ -185,10 +187,12 @@ class IaUploader:
         else:
             self.know_hashes = set()
 
+        self.pool = ThreadPoolExecutor(max_workers=count_workers)
+
     async def upload_resource(self, ia_id, ia_metadata, p_file, extra_md):
         loop = asyncio.get_running_loop()
 
-        file_hash = await loop.run_in_executor(None, partial(get_md5, p_file))
+        file_hash = await loop.run_in_executor(self.pool, partial(get_md5, p_file))
 
         # check if file was in internal metadata.
         is_know_hash = await self.check_hash_in_internal_md(file_hash)
@@ -203,7 +207,7 @@ class IaUploader:
         func_upload = partial(
             internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata,
             access_key=self.ia_access_key, secret_key=self.ia_secret_key)
-        r = await loop.run_in_executor(None, func_upload)
+        r = await loop.run_in_executor(self.pool, func_upload)
         logging.info(f"Uploaded {ia_id} to ia")
 
         # remove local file after upload
@@ -308,18 +312,15 @@ async def main():
     # an put metadata in the first queue
     # TODO: hacerlo async a esta parte, sin llenar esta queue primero
     result = await crawler.get_package_list()
-    print("poniendo paquetes en 'queue_packages'")
     for package in result["packages_list"]:
-        await queue_packages.put({"package_id": package})
-
+        queue_packages.put_nowait({"package_id": package})
+    logging.info(f"queue_packages full with packages!")
     # only for test:
     # await queue_packages.put({"package_id": "subte-estaciones"})
 
-    print("terminado de poner paquetes iniciales en 'queue_packages")
-
     # add a stop signar for each worker
     for _ in range(count_workers):
-        await queue_packages.put(None)
+        queue_packages.put_nowait(None)
 
     functions = [crawler.get_package_metadata,
                  crawler.process_package,
