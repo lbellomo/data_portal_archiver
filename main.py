@@ -309,12 +309,11 @@ async def main():
     # TODO: hacerlo async a esta parte, sin llenar esta queue primero
     result = await crawler.get_package_list()
     print("poniendo paquetes en 'queue_packages'")
-    # 
-    # for package in result["packages_list"]:
-    #     await queue_packages.put({"package_id": package})
+    for package in result["packages_list"]:
+        await queue_packages.put({"package_id": package})
 
     # only for test:
-    await queue_packages.put({"package_id": "subte-estaciones"})
+    # await queue_packages.put({"package_id": "subte-estaciones"})
 
     print("terminado de poner paquetes iniciales en 'queue_packages")
 
