@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 from inspect import isasyncgenfunction
 
 # temp imports
-# from pprint import pprint
+from pprint import pprint
 
 import httpx
 import internetarchive
@@ -22,7 +22,7 @@ class CkanCrawler:
         # Esto va a ser un nombre del dir tambien, que sea lindo sin espacios
         # y que arranque con una letra por las dudas
         self.portal_name = portal_name
-        self.client = httpx.AsyncClient(transport=httpx.HTTPTransport(retries=10))
+        self.client = httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(retries=10))
 
         self.p_base = Path(self.portal_name)
         self.p_items_md = self.p_base / "items_metadata.json"
@@ -76,7 +76,7 @@ class CkanCrawler:
         p_package_md = self.p_metadata / f"{package_id}.json"
 
         # check for old md if any
-        
+        # if p_package_md.exists():  load
 
         # read the package metada and iter for all resources
         for resource in metadata["resources"]:
@@ -86,8 +86,9 @@ class CkanCrawler:
 
             # TODO
             # check old metadata for that resource exist
-            # old_metadata =
-            # if change: save_metadata = True
+
+            # for now save all the time
+            save_metadata = True
 
             # TODO
             # check if was updated
@@ -103,32 +104,24 @@ class CkanCrawler:
 
     async def download_resource(self, resource, package_name):
         """Save a resource to disk."""
-
-        # TODO: break this funcion in more modular and tiny funcions
-
-        # resource_id = resource["id"]
         resource_url = resource["url"]
+        extra_md = {"package_name": package_name,
+                    "resource_id": resource["id"],
+                    "resource_name": resource["name"]}
 
         # TODO: do with aiofiles
-        p_download = self.p_files / package_name
-        p_download.mkdir(exist_ok=True)
-        p_file = p_download / resource_url.rsplit("/", maxsplit=1)[-1]
+        p_package = self.p_files / package_name
+        p_package.mkdir(exist_ok=True)
+        p_file = p_package / resource_url.rsplit("/", maxsplit=1)[-1]
 
-        # TODO: add retry (with transport)
         with p_file.open("wb") as f:
             async with self.client.stream("GET", resource_url) as response:
                 async for chunk in response.aiter_bytes():
                     f.write(chunk)
 
-        # TODO: tirarlo en un async thread nuevo
-        # TODO: asegurarse que sea menor a 100 caracteres (por lo menos tirar warning)
-
         ia_id, md = await self._create_ia_metadata(resource)
         logging.info(f"Downloaded file for resource {resource['name']} from package {package_name}")
-        return {"ia_id": ia_id, "ia_metadata": md, "p_file": p_file, "extra_md": {}}
-
-        # TODO: escribir archivo final con la metadata (id archivo, md5, id ai, tal vez resource-name y package-name)
-        # TODO: borrar archivo una vez bajado
+        return {"ia_id": ia_id, "ia_metadata": md, "p_file": p_file, "extra_md": extra_md}
 
     async def _create_ia_metadata(self, resource):
         description = resource["description"]
@@ -154,60 +147,72 @@ class CkanCrawler:
         return ia_id, md
 
 
-async def upload_resource(ia_id, ia_metadata, p_file, extra_md):
-    # TODO: leer las cred de variable de entorno
-    # TODO: mirar si falla, reintentar si falla
-    # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
-    func = partial(internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata)
-    loop = asyncio.get_running_loop()
-    r = await loop.run_in_executor(None, func)
-    logging.info(f"Uploaded {ia_id} to ia")
+class IaUploader:
+    def __init__(self, portal_name, count_workers):
+        self.portal_name = portal_name
+        self.count_workers = count_workers
+        self.p_internal_md = Path(self.portal_name) / "internal_metadata.json"
 
-    with p_file.open("rb") as f:
-        file_hash = md5()
-        while chunk := f.read(8192):
-            file_hash.update(chunk)
+    async def upload_resource(self, ia_id, ia_metadata, p_file, extra_md):
+        # check if file was in internal metadata.
+        # match by id_ia, and if there are a match then chech the hash
 
-    file_hash = file_hash.hexdigest()
-    p_file.unlink()
+        # TODO: leer las cred de variable de entorno
+        # TODO: mirar si falla, reintentar si falla
+        # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
+        func = partial(internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata)
+        loop = asyncio.get_running_loop()
+        r = await loop.run_in_executor(None, func)
+        logging.info(f"Uploaded {ia_id} to ia")
 
-    return {"ia_id": ia_id,
-            "file_hash": file_hash,
-            "package_id": extra_md["package_id"],
-            "resource_id": extra_md["resource_id"]}
+        # TODO: move to a function and run in another thread
+        with p_file.open("rb") as f:
+            file_hash = md5()
+            while chunk := f.read(8192):
+                file_hash.update(chunk)
 
+        file_hash = file_hash.hexdigest()
+        p_file.unlink()
 
-async def write_internal_metadata(queue, portal_name, count_workers):
-    count_end_signals = 0
-    new_md = []
+        return {"ia_id": ia_id,
+                "file_hash": file_hash,
+                "package_name": extra_md["package_name"],
+                "resource_id": extra_md["resource_id"],
+                "resource_name": extra_md["resource_name"]}
 
-    while True:
-        item = await queue.get()
-        if not item:
-            count_end_signals += 1
-            if (count_end_signals := count_end_signals + 1) >= count_workers:
-                break
+    async def write_internal_metadata(self, queue):
+        # TODO: protect this coro to write even is there are any error
+        count_end_signals = 0
+        new_md = []
 
-        # precess item
-        new_md.append(item)
+        # Wait for all the workers to finish
+        while True:
+            item = await queue.get()
+            if not item:
+                if (count_end_signals := count_end_signals + 1) >= self.count_workers:
+                    break
 
-    p_internal_md = Path(portal_name) / "internal_metadata.json"
-    # read old metadata
-    if p_internal_md.exists():
-        old_md = json.load(p_internal_md.open())
-    else:
-        old_md = []
+                continue  # do nothing with the stop signal "None"
 
-    # replace old metadata
-    new_ia_ids = set(item["ia_id"] for item in new_md)
-    # sort the items in a deterministic way for an easier diff
-    all_md = sorted([md for md in old_md if md["ia_id"] not in new_ia_ids] + new_md, key=lambda k: k["ia_id"])
+            # get all the not-None items
+            new_md.append(item)
 
-    # save to file metadata
-    with p_internal_md.open("w") as f:
-        json.dump(all_md, f, ensure_ascii=False, indent=2, sort_keys=True)
+        # read old metadata
+        if self.p_internal_md.exists():
+            old_md = json.load(self.p_internal_md.open())
+        else:
+            old_md = []
 
-    logging.info(f"New internal metadata, {len(new_md)} new items and {len(all_md)} in total")
+        # replace old metadata
+        new_ia_ids = set(item["ia_id"] for item in new_md)
+        # sort the items in a deterministic way for an easier diff
+        all_md = sorted([md for md in old_md if md["ia_id"] not in new_ia_ids] + new_md, key=lambda k: k["ia_id"])
+
+        # save to file metadata
+        with self.p_internal_md.open("w") as f:
+            json.dump(all_md, f, ensure_ascii=False, indent=2, sort_keys=True)
+
+        logging.info(f"New internal metadata, {len(new_md)} new items and {len(all_md)} in total")
 
 
 async def create_worker(function, queue_in, queue_out=None):
@@ -221,7 +226,7 @@ async def create_worker(function, queue_in, queue_out=None):
             # no more items, put stop signal for next worker
             if queue_out:
                 await queue_out.put(None)
-
+            logging.info(f"No more work, close worker from {function.__name__}")
             break
 
         if isasyncgenfunction(function):
@@ -245,7 +250,7 @@ async def main():
     count_workers = 5
     maxsize = 5
 
-    workers = {"package": [], "metadata": [], "resources": []}
+    workers = {"package": [], "metadata": [], "resources": [], "upload": []}
 
     # start queues
     queue_packages = asyncio.Queue()
@@ -257,14 +262,20 @@ async def main():
     base_url = "https://data.buenosaires.gob.ar/"
     portal_name = "buenos_aires_data"
     crawler = CkanCrawler(base_url, portal_name)
+    archiver = IaUploader(portal_name, count_workers)
 
     # download all metada from portal
     # an put metadata in the first queue
     # TODO: hacerlo async a esta parte, sin llenar esta queue primero
     result = await crawler.get_package_list()
     print("poniendo paquetes en 'queue_packages'")
-    for package in result["packages_list"]:
-        await queue_packages.put({"package_id": package})
+    # 
+    # for package in result["packages_list"]:
+    #     await queue_packages.put({"package_id": package})
+
+    # only for test:
+    await queue_packages.put({"package_id": "subte-estaciones"})
+
     print("terminado de poner paquetes iniciales en 'queue_packages")
 
     # add a stop signar for each worker
@@ -274,7 +285,7 @@ async def main():
     functions = [crawler.get_package_metadata,
                  crawler.process_package,
                  crawler.download_resource,
-                 upload_resource]
+                 archiver.upload_resource]
     queues_in = [queue_packages, queue_metadata, queue_resources, queue_uploads]
     queues_out = [queue_metadata, queue_resources, queue_uploads, queue_internal_metadata]
     workers_names = ["package", "metadata", "resources", "upload"]
@@ -292,8 +303,7 @@ async def main():
     # upload item to internet archive (ia)
 
     internal_md_tasks = asyncio.create_task(
-        write_internal_metadata(
-            queue_internal_metadata, portal_name, count_workers))
+        archiver.write_internal_metadata(queue_internal_metadata))
 
     # wait all the workers to finish
     all_tasks = [value for values in workers.values() for value in values]
@@ -335,7 +345,7 @@ async def dev_main():
     await crawler.client.aclose()
 
 if __name__ == "__main__":
-    logging.basicConfig(filename='opa.log', encoding='utf-8', level=logging.INFO)
+    logging.basicConfig(encoding='utf-8', level=logging.INFO)
     print("start")
-    asyncio.run(dev_main())
+    asyncio.run(main())
     print("end")
