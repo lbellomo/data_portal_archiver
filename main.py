@@ -171,8 +171,8 @@ class IaUploader:
         self.count_workers = count_workers
         self.p_internal_md = Path(self.portal_name) / "internal_metadata.json"
 
-        ia_access_key = os.environ.get("ia_access_key")
-        ia_secret_key = os.environ.get("ia_secret_key")
+        ia_access_key = os.environ.get("IA_ACCESS_KEY")
+        ia_secret_key = os.environ.get("IA_SECRET_KEY")
         if not (ia_access_key and ia_secret_key):
             raise ValueError("Internet Archive acces_key or secret_key missing")
 
