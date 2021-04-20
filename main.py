@@ -9,7 +9,7 @@ from urllib.parse import urljoin
 from inspect import isasyncgenfunction
 
 # temp imports
-from pprint import pprint
+# from pprint import pprint
 
 import httpx
 import internetarchive
@@ -50,7 +50,7 @@ class CkanCrawler:
         except httpx.HTTPStatusError as exc:
             logging.error(
                 f"Error response {exc.response.status_code}"
-                "while requesting {exc.request.url!r}.")
+                " while requesting {exc.request.url!r}.")
 
         r_json = r.json()
         packages_list = r_json["result"]
@@ -65,7 +65,9 @@ class CkanCrawler:
         except httpx.RequestError as exc:
             logging.error(f"An error occurred while requesting {exc.request.url!r}.")
         except httpx.HTTPStatusError as exc:
-            logging.error(f"Error response {exc.response.status_code} while requesting {exc.request.url!r}.")
+            logging.error(
+                f"Error response {exc.response.status_code}"
+                " while requesting {exc.request.url!r}.")
 
         r_json = r.json()
         metadata = r_json["result"]
@@ -123,7 +125,9 @@ class CkanCrawler:
                     f.write(chunk)
 
         ia_id, md = await self._create_ia_metadata(resource)
-        logging.info(f"Downloaded file for resource {resource['name']} from package {package_name}")
+        logging.info(
+            f"Downloaded file for resource {resource['name']}"
+            " from package {package_name}")
         return {"ia_id": ia_id, "ia_metadata": md, "p_file": p_file, "extra_md": extra_md}
 
     async def _create_ia_metadata(self, resource):
@@ -132,10 +136,11 @@ class CkanCrawler:
         table = resource.get("attributesDescription")
         if table:
             table = json.loads(table)
-            pretty_table = [f"{attr['title']} [{attr['type']}]: {attr['description']}" for attr in table]
-            description += "\n"
+            pretty_table = [
+                f"{attr['title']} [{attr['type']}]: {attr['description']}"
+                for attr in table]
 
-            description += "\n - " + "\n - ".join(pretty_table)
+            description += "\n" + "\n - " + "\n - ".join(pretty_table)
 
         md = dict(
             title=resource["name"],
@@ -239,7 +244,9 @@ class IaUploader:
         # replace old metadata
         new_ia_ids = set(item["ia_id"] for item in new_md)
         # sort the items in a deterministic way for an easier diff
-        all_md = sorted([md for md in old_md if md["ia_id"] not in new_ia_ids] + new_md, key=lambda k: k["ia_id"])
+        all_md = sorted(
+            [md for md in old_md if md["ia_id"] not in new_ia_ids] + new_md,
+            key=lambda k: k["ia_id"])
 
         # save to file metadata
         with self.p_internal_md.open("w") as f:
