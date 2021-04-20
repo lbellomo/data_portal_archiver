@@ -147,31 +147,49 @@ class CkanCrawler:
         return ia_id, md
 
 
+def get_md5(p_file: Path):
+    """Calculate the md5 of a file"""
+    with p_file.open("rb") as f:
+        file_hash = md5()
+        while chunk := f.read(8192):
+            file_hash.update(chunk)
+
+    return file_hash.hexdigest()
+
+
 class IaUploader:
     def __init__(self, portal_name, count_workers):
         self.portal_name = portal_name
         self.count_workers = count_workers
         self.p_internal_md = Path(self.portal_name) / "internal_metadata.json"
 
+        if self.p_internal_md.exists():
+            old_md = json.load(self.p_internal_md.open())
+            self.know_hashes = set(i["file_hash"] for i in old_md)
+        else:
+            self.know_hashes = set()
+
     async def upload_resource(self, ia_id, ia_metadata, p_file, extra_md):
+        loop = asyncio.get_running_loop()
+
+        file_hash = await loop.run_in_executor(None, partial(get_md5, p_file))
+
         # check if file was in internal metadata.
-        # match by id_ia, and if there are a match then chech the hash
+        is_know_hash = await self.check_hash_in_internal_md(file_hash)
+        if is_know_hash:
+            # file don't changed, skip (don't upload)
+            # remove unused local file
+            p_file.unlink()
+            return
 
         # TODO: leer las cred de variable de entorno
         # TODO: mirar si falla, reintentar si falla
         # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
-        func = partial(internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata)
-        loop = asyncio.get_running_loop()
-        r = await loop.run_in_executor(None, func)
+        func_upload = partial(internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata)
+        r = await loop.run_in_executor(None, func_upload)
         logging.info(f"Uploaded {ia_id} to ia")
 
-        # TODO: move to a function and run in another thread
-        with p_file.open("rb") as f:
-            file_hash = md5()
-            while chunk := f.read(8192):
-                file_hash.update(chunk)
-
-        file_hash = file_hash.hexdigest()
+        # remove local file after upload
         p_file.unlink()
 
         return {"ia_id": ia_id,
@@ -179,6 +197,9 @@ class IaUploader:
                 "package_name": extra_md["package_name"],
                 "resource_id": extra_md["resource_id"],
                 "resource_name": extra_md["resource_name"]}
+
+    async def check_hash_in_internal_md(self, file_hash):
+        return file_hash in self.know_hashes
 
     async def write_internal_metadata(self, queue):
         # TODO: protect this coro to write even is there are any error
