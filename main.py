@@ -51,7 +51,7 @@ class CkanCrawler:
         except httpx.HTTPStatusError as exc:
             logging.error(
                 f"Error response {exc.response.status_code}"
-                " while requesting {exc.request.url!r}.")
+                f" while requesting {exc.request.url!r}.")
 
         r_json = r.json()
         packages_list = r_json["result"]
@@ -68,7 +68,7 @@ class CkanCrawler:
         except httpx.HTTPStatusError as exc:
             logging.error(
                 f"Error response {exc.response.status_code}"
-                " while requesting {exc.request.url!r}.")
+                f" while requesting {exc.request.url!r}.")
 
         r_json = r.json()
         metadata = r_json["result"]
@@ -128,7 +128,7 @@ class CkanCrawler:
         ia_id, md = await self._create_ia_metadata(resource)
         logging.info(
             f"Downloaded file for resource {resource['name']}"
-            " from package {package_name}")
+            f" from package {package_name}")
         return {"ia_id": ia_id, "ia_metadata": md, "p_file": p_file, "extra_md": extra_md}
 
     async def _create_ia_metadata(self, resource):
