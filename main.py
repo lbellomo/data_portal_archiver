@@ -2,6 +2,7 @@ import os
 import json
 import asyncio
 import logging
+from time import time
 from hashlib import md5
 from pathlib import Path
 from functools import partial
@@ -204,16 +205,11 @@ class IaUploader:
 
         file_hash = await loop.run_in_executor(self.pool, partial(get_md5, p_file))
 
-        # check if file was in internal metadata.
         is_know_hash = await self.check_hash_in_internal_md(file_hash)
-        if is_know_hash:
-            # file don't changed, skip (don't upload)
-            # remove unused local file
-            p_file.unlink()
+        if is_know_hash:  # file don't changed, skip (don't upload)
+            p_file.unlink()  # remove unused local file
             return
 
-        # TODO: mirar si falla, reintentar si falla
-        # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
         func_upload = partial(
             internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata,
             access_key=self.ia_access_key, secret_key=self.ia_secret_key,
@@ -227,12 +223,11 @@ class IaUploader:
             return
 
         logging.info(f"Uploaded {ia_id} to ia")
-
-        # remove local file after upload
-        p_file.unlink()
+        p_file.unlink()  # remove local file after upload
 
         return {"ia_id": ia_id,
                 "file_hash": file_hash,
+                "timestamp": int(time()),
                 "package_name": extra_md["package_name"],
                 "resource_id": extra_md["resource_id"],
                 "resource_name": extra_md["resource_name"]}
@@ -259,6 +254,27 @@ class IaUploader:
                 json.dump(item, f, ensure_ascii=False, sort_keys=True)
                 f.write("\n")
 
+        # Remove duplicated and keep only with the last
+        with self.p_internal_md.open() as f:
+            all_md = [json.loads(line) for line in f.readlines()]
+
+        all_md.sort(key=lambda x: x["timestamp"], reverse=True)
+        all_md.sort(key=lambda x: x["ia_id"])
+
+        uniques_ia_ids = set()
+        uniques_md = []
+        for item in all_md:
+            if item["ia_id"] not in uniques_ia_ids:
+                uniques_md.append(item)
+                uniques_ia_ids.add(item["ia_id"])
+
+        with self.p_internal_md.open("w") as f:
+            for item in uniques_md:
+                json.dump(item, f, ensure_ascii=False, sort_keys=True)
+                f.write("\n")
+
+        # pprint(all_md)
+
         # # read old metadata
         # if self.p_internal_md.exists():
         #     old_md = json.load(self.p_internal_md.open())
@@ -277,7 +293,7 @@ class IaUploader:
         #     json.dump(all_md, f, ensure_ascii=False, indent=2, sort_keys=True)
 
         # logging.info(f"New internal metadata, {len(new_md)} new items and {len(all_md)} in total")
-        logging.info("New internal metadata writed")
+        logging.info(f"New internal metadata writed, len with duplicates: {len(all_md)}, len uniques: {len(uniques_md)}")
 
 
 async def create_worker(function, queue_in, queue_out=None):
