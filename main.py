@@ -16,6 +16,7 @@ import httpx
 import internetarchive
 from requests import HTTPError
 
+
 class CkanCrawler:
     def __init__(self, base_url, portal_name):
         # TODO: try/validate the base url
@@ -120,10 +121,17 @@ class CkanCrawler:
         p_package.mkdir(exist_ok=True)
         p_file = p_package / resource_url.rsplit("/", maxsplit=1)[-1]
 
-        with p_file.open("wb") as f:
-            async with self.client.stream("GET", resource_url) as response:
-                async for chunk in response.aiter_bytes():
-                    f.write(chunk)
+        try:
+            with p_file.open("wb") as f:
+                async with self.client.stream("GET", resource_url) as response:
+                    async for chunk in response.aiter_bytes():
+                        f.write(chunk)
+        except httpx.RequestError as e:
+            logging.error(f"Error {e} downloading resource: {package_name} {resource['name']}")
+            if p_file.exists():
+                p_file.unlink()
+            return
+
 
         ia_id, md = await self._create_ia_metadata(resource)
         logging.info(
@@ -211,12 +219,12 @@ class IaUploader:
             access_key=self.ia_access_key, secret_key=self.ia_secret_key,
             retries=self.retries, retries_sleep=self.retries_sleep)
         try:
-            r = await loop.run_in_executor(self.pool, func_upload)
+            _ = await loop.run_in_executor(self.pool, func_upload)
         except HTTPError as e:
             logging.error(
                 f"Error {e} with file: {extra_md['package_name']}, {extra_md['resource_name']}")
             p_file.unlink()
-            return None
+            return
 
         logging.info(f"Uploaded {ia_id} to ia")
 
@@ -235,7 +243,6 @@ class IaUploader:
     async def write_internal_metadata(self, queue):
         # TODO: protect this coro to write even is there are any error
         count_end_signals = 0
-        new_md = []
 
         # Wait for all the workers to finish
         with self.p_internal_md.open("a") as f:
@@ -270,7 +277,7 @@ class IaUploader:
         #     json.dump(all_md, f, ensure_ascii=False, indent=2, sort_keys=True)
 
         # logging.info(f"New internal metadata, {len(new_md)} new items and {len(all_md)} in total")
-        logging.info(f"New internal metadata")
+        logging.info("New internal metadata writed")
 
 
 async def create_worker(function, queue_in, queue_out=None):
@@ -327,11 +334,11 @@ async def main():
     # TODO: hacerlo async a esta parte, sin llenar esta queue primero
     result = await crawler.get_package_list()
 
-    # result["packages_list"] = ["subte-estaciones", "programa-aprende-programando"]  # debug
+    result["packages_list"] = ["subte-estaciones", "programa-aprende-programando"]  # debug
 
     for package in result["packages_list"]:
         queue_packages.put_nowait({"package_id": package})
-    logging.info(f"queue_packages full with packages!")
+    logging.info("queue_packages full with packages!")
     # only for test:
     # await queue_packages.put({"package_id": "subte-estaciones"})
 
