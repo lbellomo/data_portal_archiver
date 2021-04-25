@@ -133,7 +133,6 @@ class CkanCrawler:
                 p_file.unlink()
             return
 
-
         ia_id, md = await self._create_ia_metadata(resource)
         logging.info(
             f"Downloaded file for resource {resource['name']}"
@@ -202,11 +201,14 @@ class IaUploader:
 
     async def upload_resource(self, ia_id, ia_metadata, p_file, extra_md):
         loop = asyncio.get_running_loop()
-
+        if not p_file.exists():
+            logging.error(f"File {p_file} not exist! Resource: {extra_md['resource_name']}")
+            return
         file_hash = await loop.run_in_executor(self.pool, partial(get_md5, p_file))
 
         is_know_hash = await self.check_hash_in_internal_md(file_hash)
         if is_know_hash:  # file don't changed, skip (don't upload)
+            logging.info(f"File {ia_id} have a know hash, skip.")
             p_file.unlink()  # remove unused local file
             return
 
