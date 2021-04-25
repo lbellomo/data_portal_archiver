@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 import internetarchive
-
+from requests import HTTPError
 
 class CkanCrawler:
     def __init__(self, base_url, portal_name):
@@ -171,6 +171,9 @@ class IaUploader:
     def __init__(self, portal_name, count_workers):
         self.portal_name = portal_name
         self.count_workers = count_workers
+        # TODO: read from config file
+        self.retries = 5
+        self.retries_sleep = 60
         self.p_internal_md = Path(self.portal_name) / "internal_metadata.json"
 
         ia_access_key = os.environ.get("IA_ACCESS_KEY")
@@ -182,8 +185,7 @@ class IaUploader:
         self.ia_secret_key = ia_secret_key
 
         if self.p_internal_md.exists():
-            old_md = json.load(self.p_internal_md.open())
-            self.know_hashes = set(i["file_hash"] for i in old_md)
+            self.know_hashes = set(json.loads(line)["file_hash"] for line in self.p_internal_md.open())
         else:
             self.know_hashes = set()
 
@@ -206,8 +208,16 @@ class IaUploader:
         # https://archive.org/services/docs/api/internetarchive/api.html#ia-s3-configuration
         func_upload = partial(
             internetarchive.upload, ia_id, files=[str(p_file)], metadata=ia_metadata,
-            access_key=self.ia_access_key, secret_key=self.ia_secret_key)
-        r = await loop.run_in_executor(self.pool, func_upload)
+            access_key=self.ia_access_key, secret_key=self.ia_secret_key,
+            retries=self.retries, retries_sleep=self.retries_sleep)
+        try:
+            r = await loop.run_in_executor(self.pool, func_upload)
+        except HTTPError as e:
+            logging.error(
+                f"Error {e} with file: {extra_md['package_name']}, {extra_md['resource_name']}")
+            p_file.unlink()
+            return None
+
         logging.info(f"Uploaded {ia_id} to ia")
 
         # remove local file after upload
@@ -228,35 +238,39 @@ class IaUploader:
         new_md = []
 
         # Wait for all the workers to finish
-        while True:
-            item = await queue.get()
-            if not item:
-                if (count_end_signals := count_end_signals + 1) >= self.count_workers:
-                    break
+        with self.p_internal_md.open("a") as f:
+            while True:
+                item = await queue.get()
+                if not item:
+                    if (count_end_signals := count_end_signals + 1) >= self.count_workers:
+                        break
 
-                continue  # do nothing with the stop signal "None"
+                    continue  # do nothing with the stop signal "None"
 
-            # get all the not-None items
-            new_md.append(item)
+                # get all the not-None items
+                # new_md.append(item)
+                json.dump(item, f, ensure_ascii=False, sort_keys=True)
+                f.write("\n")
 
-        # read old metadata
-        if self.p_internal_md.exists():
-            old_md = json.load(self.p_internal_md.open())
-        else:
-            old_md = []
+        # # read old metadata
+        # if self.p_internal_md.exists():
+        #     old_md = json.load(self.p_internal_md.open())
+        # else:
+        #     old_md = []
 
-        # replace old metadata
-        new_ia_ids = set(item["ia_id"] for item in new_md)
-        # sort the items in a deterministic way for an easier diff
-        all_md = sorted(
-            [md for md in old_md if md["ia_id"] not in new_ia_ids] + new_md,
-            key=lambda k: k["ia_id"])
+        # # replace old metadata
+        # new_ia_ids = set(item["ia_id"] for item in new_md)
+        # # sort the items in a deterministic way for an easier diff
+        # all_md = sorted(
+        #     [md for md in old_md if md["ia_id"] not in new_ia_ids] + new_md,
+        #     key=lambda k: k["ia_id"])
 
-        # save to file metadata
-        with self.p_internal_md.open("w") as f:
-            json.dump(all_md, f, ensure_ascii=False, indent=2, sort_keys=True)
+        # # save to file metadata
+        # with self.p_internal_md.open("w") as f:
+        #     json.dump(all_md, f, ensure_ascii=False, indent=2, sort_keys=True)
 
-        logging.info(f"New internal metadata, {len(new_md)} new items and {len(all_md)} in total")
+        # logging.info(f"New internal metadata, {len(new_md)} new items and {len(all_md)} in total")
+        logging.info(f"New internal metadata")
 
 
 async def create_worker(function, queue_in, queue_out=None):
@@ -312,6 +326,9 @@ async def main():
     # an put metadata in the first queue
     # TODO: hacerlo async a esta parte, sin llenar esta queue primero
     result = await crawler.get_package_list()
+
+    # result["packages_list"] = ["subte-estaciones", "programa-aprende-programando"]  # debug
+
     for package in result["packages_list"]:
         queue_packages.put_nowait({"package_id": package})
     logging.info(f"queue_packages full with packages!")
