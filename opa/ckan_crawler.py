@@ -7,7 +7,7 @@ import httpx
 
 
 class CkanCrawler:
-    def __init__(self, base_url, portal_name):
+    def __init__(self, base_url, portal_name, base_path=Path()):
         # TODO: try/validate the base url
         self.base_url = base_url
         # TODO: check valid portal_name (solo letras/numeros . - _)
@@ -16,7 +16,7 @@ class CkanCrawler:
         self.portal_name = portal_name
         self.client = httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(retries=10))
 
-        self.p_base = Path(self.portal_name)
+        self.p_base = base_path / self.portal_name
         self.p_items_md = self.p_base / "items_metadata.json"
         self.p_files = self.p_base / "files"
         self.p_metadata = self.p_base / "metadata"
@@ -38,13 +38,16 @@ class CkanCrawler:
             r.raise_for_status()
         except httpx.RequestError as exc:
             logging.error(f"An error occurred while requesting {exc.request.url!r}.")
+            return
         except httpx.HTTPStatusError as exc:
             logging.error(
                 f"Error response {exc.response.status_code}"
                 f" while requesting {exc.request.url!r}."
             )
+            return
 
         r_json = r.json()
+        print(f"{r_json=}")
         packages_list = r_json["result"]
         logging.info(f"Downloaded package list with {len(packages_list)} packages")
         return {"packages_list": packages_list}

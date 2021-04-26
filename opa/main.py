@@ -33,12 +33,12 @@ async def main():
     # download all metada from portal
     # an put metadata in the first queue
     # TODO: hacerlo async a esta parte, sin llenar esta queue primero
-    result = await crawler.get_package_list()
+    r_package_list = await crawler.get_package_list()
 
-    result["packages_list"] = ["subte-estaciones",
+    r_package_list["packages_list"] = ["subte-estaciones",
                                "programa-aprende-programando"]  # debug
 
-    for package in result["packages_list"]:
+    for package in r_package_list["packages_list"]:
         queue_packages.put_nowait({"package_id": package})
     logging.info("queue_packages full with packages!")
     # only for test:

@@ -10,17 +10,17 @@ from concurrent.futures import ThreadPoolExecutor
 import internetarchive
 from requests import HTTPError
 
-from utils import get_md5
+from opa.utils import get_md5
 
 
 class IaUploader:
-    def __init__(self, portal_name, count_workers):
+    def __init__(self, portal_name, count_workers, base_path=Path()):
         self.portal_name = portal_name
         self.count_workers = count_workers
         # TODO: read from config file
         self.retries = 5
         self.retries_sleep = 60
-        self.p_internal_md = Path(self.portal_name) / "internal_metadata.json"
+        self.p_internal_md = base_path / self.portal_name / "internal_metadata.json"
 
         ia_access_key = os.environ.get("IA_ACCESS_KEY")
         ia_secret_key = os.environ.get("IA_SECRET_KEY")
