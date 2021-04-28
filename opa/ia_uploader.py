@@ -10,13 +10,22 @@ from concurrent.futures import ThreadPoolExecutor
 import internetarchive
 from requests import HTTPError
 
-from opa.utils import get_md5
+from utils import get_md5
 
 
 class IaUploader:
-    def __init__(self, portal_name, count_workers, base_path=Path()):
+    def __init__(
+        self,
+        portal_name,
+        count_workers,
+        upload_resources,
+        save_internal_metadata,
+        base_path=Path(),
+    ):
         self.portal_name = portal_name
         self.count_workers = count_workers
+        self.upload_resources = upload_resources
+        self.save_internal_metadata = save_internal_metadata
         # TODO: read from config file
         self.retries = 5
         self.retries_sleep = 60
@@ -24,7 +33,7 @@ class IaUploader:
 
         ia_access_key = os.environ.get("IA_ACCESS_KEY")
         ia_secret_key = os.environ.get("IA_SECRET_KEY")
-        if not (ia_access_key and ia_secret_key):
+        if self.upload_resources and not (ia_access_key and ia_secret_key):
             raise ValueError("Internet Archive acces_key or secret_key missing")
 
         self.ia_access_key = ia_access_key
@@ -64,18 +73,18 @@ class IaUploader:
             retries=self.retries,
             retries_sleep=self.retries_sleep,
         )
-        try:
-            # _ = await loop.run_in_executor(self.pool, func_upload)
-            pass
-        except HTTPError as e:
-            logging.error(
-                f"Error {e} with file: "
-                f"{extra_md['package_name']}, {extra_md['resource_name']}"
-            )
-            p_file.unlink()
-            return
+        if self.upload_resources:
+            try:
+                _ = await loop.run_in_executor(self.pool, func_upload)
+                logging.info(f"Uploaded {ia_id} to ia")
+            except HTTPError as e:
+                logging.error(
+                    f"Error {e} with file: "
+                    f"{extra_md['package_name']}, {extra_md['resource_name']}"
+                )
+                p_file.unlink()
+                return
 
-        logging.info(f"Uploaded {ia_id} to ia")
         p_file.unlink()  # remove local file after upload
 
         return {
@@ -108,48 +117,31 @@ class IaUploader:
 
                 # get all the not-None items
                 # new_md.append(item)
-                json.dump(item, f, ensure_ascii=False, sort_keys=True)
-                f.write("\n")
+                if self.save_internal_metadata:
+                    json.dump(item, f, ensure_ascii=False, sort_keys=True)
+                    f.write("\n")
 
-        # Remove duplicated and keep only with the last
-        with self.p_internal_md.open() as f:
-            all_md = [json.loads(line) for line in f.readlines()]
+        if self.save_internal_metadata:
+            # Remove duplicated and keep only with the last
+            with self.p_internal_md.open() as f:
+                all_md = [json.loads(line) for line in f.readlines()]
 
-        all_md.sort(key=lambda x: x["timestamp"], reverse=True)
-        all_md.sort(key=lambda x: x["ia_id"])
+            all_md.sort(key=lambda x: x["timestamp"], reverse=True)
+            all_md.sort(key=lambda x: x["ia_id"])
 
-        uniques_ia_ids = set()
-        uniques_md = []
-        for item in all_md:
-            if item["ia_id"] not in uniques_ia_ids:
-                uniques_md.append(item)
-                uniques_ia_ids.add(item["ia_id"])
+            uniques_ia_ids = set()
+            uniques_md = []
+            for item in all_md:
+                if item["ia_id"] not in uniques_ia_ids:
+                    uniques_md.append(item)
+                    uniques_ia_ids.add(item["ia_id"])
 
-        with self.p_internal_md.open("w") as f:
-            for item in uniques_md:
-                json.dump(item, f, ensure_ascii=False, sort_keys=True)
-                f.write("\n")
+            with self.p_internal_md.open("w") as f:
+                for item in uniques_md:
+                    json.dump(item, f, ensure_ascii=False, sort_keys=True)
+                    f.write("\n")
 
-        # pprint(all_md)
-
-        # # read old metadata
-        # if self.p_internal_md.exists():
-        #     old_md = json.load(self.p_internal_md.open())
-        # else:
-        #     old_md = []
-
-        # # replace old metadata
-        # new_ia_ids = set(item["ia_id"] for item in new_md)
-        # # sort the items in a deterministic way for an easier diff
-        # all_md = sorted(
-        #     [md for md in old_md if md["ia_id"] not in new_ia_ids] + new_md,
-        #     key=lambda k: k["ia_id"])
-
-        # # save to file metadata
-        # with self.p_internal_md.open("w") as f:
-        #     json.dump(all_md, f, ensure_ascii=False, indent=2, sort_keys=True)
-
-        logging.info(
-            "New internal metadata writed, len with duplicates: "
-            f"{len(all_md)}, len uniques: {len(uniques_md)}"
-        )
+            logging.info(
+                "New internal metadata writed, len with duplicates: "
+                f"{len(all_md)}, len uniques: {len(uniques_md)}"
+            )

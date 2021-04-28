@@ -1,5 +1,9 @@
+import sys
 import asyncio
 import logging
+from pathlib import Path
+
+import toml
 
 from ckan_crawler import CkanCrawler
 from ia_uploader import IaUploader
@@ -8,13 +12,54 @@ from utils import create_worker
 # temp imports
 # from pprint import pprint
 
+default_count_workers = 5
+default_maxsize = 5
+default_save_package_metadata = True
+default_upload_resources = True
+default_save_internal_metadata = True
+
 
 async def main():
     # read config
+    # TODO: move to another funcion
+    # TODO: made a config object (maybe pydantic) and pass the object
+    p_config = Path("portals.toml")
+    config = toml.load(p_config.open())
+    general_config = config.get("opa", dict())
+    sections_config = config.get("section", dict())
 
-    # total nomber of workers for each task
-    count_workers = 5
-    maxsize = 5
+    count_workers = general_config.get("count_workers", default_count_workers)
+    maxsize = general_config.get("maxsize", default_maxsize)
+    save_package_metadata = general_config.get(
+        "save_package_metadata", default_save_package_metadata
+    )
+    upload_resources = general_config.get("upload_resources", default_upload_resources)
+    save_internal_metadata = general_config.get(
+        "save_internal_metadata", default_save_internal_metadata
+    )
+
+    if not sections_config:
+        logging.error("Missing 'section' field in config!")
+        sys.exist(1)
+
+    # TODO: read the toml section from cli
+    # for now read the first one
+    for section in sections_config:
+        section_name = section
+        break
+
+    if section_name not in sections_config:
+        logging.error(f"Section {section_name} not in config!")
+        sys.exist(1)
+
+    section_config = sections_config[section_name]
+
+    if not all(k in section_config for k in ["base_url", "portal_name"]):
+        logging.error(f"Section {section_name} missing 'base_url' or 'portal_name'!")
+        sys.exist(1)
+
+    base_url = section_config["base_url"]
+    portal_name = section_config["portal_name"]
 
     workers = {"package": [], "metadata": [], "resources": [], "upload": []}
 
@@ -25,18 +70,21 @@ async def main():
     queue_uploads = asyncio.Queue(maxsize=maxsize)
     queue_internal_metadata = asyncio.Queue(maxsize=maxsize)
 
-    base_url = "https://data.buenosaires.gob.ar/"
-    portal_name = "buenos_aires_data"
-    crawler = CkanCrawler(base_url, portal_name)
-    archiver = IaUploader(portal_name, count_workers)
+    crawler = CkanCrawler(base_url, portal_name, save_package_metadata)
+    archiver = IaUploader(
+        portal_name, count_workers, upload_resources, save_internal_metadata
+    )
 
     # download all metada from portal
     # an put metadata in the first queue
     # TODO: hacerlo async a esta parte, sin llenar esta queue primero
     r_package_list = await crawler.get_package_list()
 
-    r_package_list["packages_list"] = ["subte-estaciones",
-                               "programa-aprende-programando"]  # debug
+    # TODO: mover esta parte de allow packages a la config
+    r_package_list["packages_list"] = [
+        "subte-estaciones",
+        "programa-aprende-programando",
+    ]  # debug
 
     for package in r_package_list["packages_list"]:
         queue_packages.put_nowait({"package_id": package})

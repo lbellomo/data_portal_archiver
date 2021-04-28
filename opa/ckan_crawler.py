@@ -7,13 +7,20 @@ import httpx
 
 
 class CkanCrawler:
-    def __init__(self, base_url, portal_name, base_path=Path()):
+    def __init__(
+        self,
+        base_url,
+        portal_name,
+        save_metadata,
+        base_path=Path(),
+    ):
         # TODO: try/validate the base url
         self.base_url = base_url
         # TODO: check valid portal_name (solo letras/numeros . - _)
         # Esto va a ser un nombre del dir tambien, que sea lindo sin espacios
         # y que arranque con una letra por las dudas
         self.portal_name = portal_name
+        self.save_metadata = save_metadata
         self.client = httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(retries=10))
 
         self.p_base = base_path / self.portal_name
@@ -47,7 +54,6 @@ class CkanCrawler:
             return
 
         r_json = r.json()
-        print(f"{r_json=}")
         packages_list = r_json["result"]
         logging.info(f"Downloaded package list with {len(packages_list)} packages")
         return {"packages_list": packages_list}
@@ -72,7 +78,7 @@ class CkanCrawler:
         return {"metadata": metadata}
 
     async def process_package(self, metadata):
-        save_metadata = False
+        is_new = False
         package_id = metadata["name"]
         p_package_md = self.p_metadata / f"{package_id}.json"
 
@@ -89,7 +95,7 @@ class CkanCrawler:
             # check old metadata for that resource exist
 
             # for now save all the time
-            save_metadata = True
+            is_new = True
 
             # TODO
             # check if was updated
@@ -99,7 +105,7 @@ class CkanCrawler:
             yield {"resource": resource, "package_name": metadata["name"]}
 
         # if any resource change, write new metadata
-        if save_metadata:
+        if self.save_metadata and is_new:
             # TODO: do with aiofiles
             with p_package_md.open("w") as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=2, sort_keys=True)
