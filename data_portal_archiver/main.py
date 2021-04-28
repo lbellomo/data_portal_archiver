@@ -25,7 +25,7 @@ async def main():
     # TODO: made a config object (maybe pydantic) and pass the object
     p_config = Path("portals.toml")
     config = toml.load(p_config.open())
-    general_config = config.get("opa", dict())
+    general_config = config.get("global", dict())
     sections_config = config.get("section", dict())
 
     count_workers = general_config.get("count_workers", default_count_workers)
