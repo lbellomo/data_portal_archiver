@@ -18,6 +18,7 @@ default_maxsize = 5
 default_save_package_metadata = True
 default_upload_resources = True
 default_save_internal_metadata = True
+default_download_only_new_data = True
 
 
 async def main(section_name):
@@ -37,6 +38,9 @@ async def main(section_name):
     upload_resources = general_config.get("upload_resources", default_upload_resources)
     save_internal_metadata = general_config.get(
         "save_internal_metadata", default_save_internal_metadata
+    )
+    download_only_new_data = general_config.get(
+        "download_only_new_data", default_download_only_new_data
     )
 
     if not sections_config:
@@ -65,7 +69,9 @@ async def main(section_name):
     queue_uploads = asyncio.Queue(maxsize=maxsize)
     queue_internal_metadata = asyncio.Queue(maxsize=maxsize)
 
-    crawler = CkanCrawler(base_url, portal_name, save_package_metadata)
+    crawler = CkanCrawler(
+        base_url, portal_name, save_package_metadata, download_only_new_data
+    )
     archiver = IaUploader(
         portal_name, count_workers, upload_resources, save_internal_metadata
     )

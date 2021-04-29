@@ -12,6 +12,7 @@ class CkanCrawler:
         base_url,
         portal_name,
         save_metadata,
+        download_only_new_data,
         base_path=Path(),
     ):
         # TODO: try/validate the base url
@@ -21,12 +22,14 @@ class CkanCrawler:
         # y que arranque con una letra por las dudas
         self.portal_name = portal_name
         self.save_metadata = save_metadata
+        self.download_only_new_data = download_only_new_data
         self.client = httpx.AsyncClient(transport=httpx.AsyncHTTPTransport(retries=10))
 
         self.p_base = base_path / self.portal_name
         self.p_items_md = self.p_base / "items_metadata.json"
         self.p_files = self.p_base / "files"
         self.p_metadata = self.p_base / "metadata"
+        self.p_internal_md = self.p_base / "internal_metadata.json"
 
         self.p_base.mkdir(exist_ok=True)
         self.p_files.mkdir(exist_ok=True)
@@ -34,6 +37,14 @@ class CkanCrawler:
 
         self.url_package_list = urljoin(self.base_url, "/api/3/action/package_list")
         self.url_package_show = urljoin(self.base_url, "/api/3/action/package_show")
+
+        if not self.p_internal_md.exists():
+            self.know_resoureces = set()
+        else:
+            self.know_resoureces = set(
+                json.loads(line).get("resource_id")
+                for line in self.p_internal_md.open()
+            )
 
         # TODO: add valid formats from config file
         self.valid_formats = ["csv"]
@@ -100,8 +111,13 @@ class CkanCrawler:
             # for now save all the time
             is_new = True
 
-            # TODO
             # check if was updated
+            if self.download_only_new_data and resource["id"] in self.know_resoureces:
+                logging.info(
+                    f"Skipping resource {resource['name']}, is in internal metadata"
+                )
+                yield
+
             logging.info(
                 f"Procesed resource {resource['name']} from package {metadata['name']}"
             )
