@@ -1,3 +1,4 @@
+import os
 import sys
 import asyncio
 import logging
@@ -137,10 +138,15 @@ async def main(section_name):
 
 def run():
     args = sys.argv[1:]
-    if not args:
+    env_section_name = os.environ.get("SECTION_NAME")
+
+    if not args and not env_section_name:
         logging.error("You need to pass the section_name like: 'dpa some_section_name'")
         sys.exit(1)
+    elif not args:
+        section_name = env_section_name
+    else:
+        section_name = args[0]
 
-    section_name = args[0]
     logging.basicConfig(encoding="utf-8", level=logging.INFO)
     asyncio.run(main(section_name=section_name))
