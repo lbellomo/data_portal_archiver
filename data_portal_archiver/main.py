@@ -8,7 +8,7 @@ import toml
 
 from data_portal_archiver.ckan_crawler import CkanCrawler
 from data_portal_archiver.ia_uploader import IaUploader
-from data_portal_archiver.utils import create_worker
+from data_portal_archiver.utils import create_worker, write_portal_readme
 
 # temp imports
 # from pprint import pprint
@@ -76,10 +76,10 @@ async def main(section_name):
     r_package_list = await crawler.get_package_list()
 
     # TODO: mover esta parte de allow packages a la config
-    # r_package_list["packages_list"] = [
-    #     "subte-estaciones",
-    #     "programa-aprende-programando",
-    # ]  # debug
+    r_package_list["packages_list"] = [
+        "subte-estaciones",
+        "programa-aprende-programando",
+    ]  # debug
 
     for package in r_package_list["packages_list"]:
         queue_packages.put_nowait({"package_id": package})
@@ -129,6 +129,10 @@ async def main(section_name):
 
     # wait the internal metadata
     await internal_md_tasks
+
+    # write final portal readme
+    write_portal_readme(portal_name, base_url)
+    logging.info("Portal readme updated")
 
     # cerramos el cliente
     await crawler.client.aclose()
