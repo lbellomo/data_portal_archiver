@@ -60,16 +60,19 @@ class CkanCrawler:
 
     async def get_package_metadata(self, package_id):
         """Get the metadata from an package."""
+        # TODO: add retry for this try
         try:
             r = await self.client.get(self.url_package_show, params={"id": package_id})
             r.raise_for_status()
         except httpx.RequestError as exc:
             logging.error(f"An error occurred while requesting {exc.request.url!r}.")
+            return
         except httpx.HTTPStatusError as exc:
             logging.error(
                 f"Error response {exc.response.status_code}"
                 f" while requesting {exc.request.url!r}."
             )
+            return
 
         r_json = r.json()
         metadata = r_json["result"]
