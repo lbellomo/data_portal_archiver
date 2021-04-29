@@ -49,10 +49,12 @@ class IaUploader:
         self.pool = ThreadPoolExecutor(max_workers=count_workers)
 
     async def upload_resource(self, ia_id, ia_metadata, p_file, extra_md):
+        # TODO: fix ploblem with file not found
         loop = asyncio.get_running_loop()
         if not p_file.exists():
             logging.error(
-                f"File {p_file} not exist before upload! Resource: {extra_md['resource_name']}"
+                f"File {p_file} not exist before upload!"
+                " Resource: {extra_md['resource_name']}"
             )
             return
         file_hash = await loop.run_in_executor(self.pool, partial(get_md5, p_file))
@@ -83,6 +85,12 @@ class IaUploader:
                     f"{extra_md['package_name']}, {extra_md['resource_name']}"
                 )
                 p_file.unlink()
+                return
+            except FileNotFoundError as e:
+                logging.error(
+                    f"Error {e} with file: "
+                    f"{extra_md['package_name']}, {extra_md['resource_name']}"
+                )
                 return
 
         if not p_file.exists():
