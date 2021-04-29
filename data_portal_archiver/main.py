@@ -5,9 +5,9 @@ from pathlib import Path
 
 import toml
 
-from ckan_crawler import CkanCrawler
-from ia_uploader import IaUploader
-from utils import create_worker
+from data_portal_archiver.ckan_crawler import CkanCrawler
+from data_portal_archiver.ia_uploader import IaUploader
+from data_portal_archiver.utils import create_worker
 
 # temp imports
 # from pprint import pprint
@@ -19,7 +19,7 @@ default_upload_resources = True
 default_save_internal_metadata = True
 
 
-async def main():
+async def main(section_name):
     # read config
     # TODO: move to another funcion
     # TODO: made a config object (maybe pydantic) and pass the object
@@ -41,12 +41,6 @@ async def main():
     if not sections_config:
         logging.error("Missing 'section' field in config!")
         sys.exist(1)
-
-    # TODO: read the toml section from cli
-    # for now read the first one
-    for section in sections_config:
-        section_name = section
-        break
 
     if section_name not in sections_config:
         logging.error(f"Section {section_name} not in config!")
@@ -81,10 +75,10 @@ async def main():
     r_package_list = await crawler.get_package_list()
 
     # TODO: mover esta parte de allow packages a la config
-    r_package_list["packages_list"] = [
-        "subte-estaciones",
-        "programa-aprende-programando",
-    ]  # debug
+    # r_package_list["packages_list"] = [
+    #     "subte-estaciones",
+    #     "programa-aprende-programando",
+    # ]  # debug
 
     for package in r_package_list["packages_list"]:
         queue_packages.put_nowait({"package_id": package})
@@ -141,8 +135,12 @@ async def main():
     print("---\nEND MAIN\n---")
 
 
-if __name__ == "__main__":
+def run():
+    args = sys.argv[1:]
+    if not args:
+        logging.error("You need to pass the section_name like: 'dpa some_section_name'")
+        sys.exit(1)
+
+    section_name = args[0]
     logging.basicConfig(encoding="utf-8", level=logging.INFO)
-    print("start")
-    asyncio.run(main())
-    print("end")
+    asyncio.run(main(section_name=section_name))

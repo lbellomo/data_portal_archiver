@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 import internetarchive
 from requests import HTTPError
 
-from utils import get_md5
+from data_portal_archiver.utils import get_md5
 
 
 class IaUploader:
