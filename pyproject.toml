@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "data_portal_archiver"
-version = "0.0.1"
+version = "0.1.6"
 description = ""
 authors = ["Lucas Bellomo <lbellomo@gmail.com>"]
 
