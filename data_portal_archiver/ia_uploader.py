@@ -52,7 +52,7 @@ class IaUploader:
         loop = asyncio.get_running_loop()
         if not p_file.exists():
             logging.error(
-                f"File {p_file} not exist! Resource: {extra_md['resource_name']}"
+                f"File {p_file} not exist before upload! Resource: {extra_md['resource_name']}"
             )
             return
         file_hash = await loop.run_in_executor(self.pool, partial(get_md5, p_file))
@@ -84,6 +84,13 @@ class IaUploader:
                 )
                 p_file.unlink()
                 return
+
+        if not p_file.exists():
+            logging.error(
+                f"File {p_file} not exist before upload!"
+                f" Resource: {extra_md['resource_name']}"
+            )
+            return
 
         p_file.unlink()  # remove local file after upload
 

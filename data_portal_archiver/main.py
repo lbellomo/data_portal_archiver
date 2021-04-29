@@ -76,10 +76,10 @@ async def main(section_name):
     r_package_list = await crawler.get_package_list()
 
     # TODO: mover esta parte de allow packages a la config
-    r_package_list["packages_list"] = [
-        "subte-estaciones",
-        "programa-aprende-programando",
-    ]  # debug
+    # r_package_list["packages_list"] = [
+    #     "subte-estaciones",
+    #     "programa-aprende-programando",
+    # ]  # debug
 
     for package in r_package_list["packages_list"]:
         queue_packages.put_nowait({"package_id": package})
