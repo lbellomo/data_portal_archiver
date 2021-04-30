@@ -8,7 +8,7 @@ from functools import partial
 from concurrent.futures import ThreadPoolExecutor
 
 import internetarchive
-from requests import HTTPError
+from requests import RequestException
 
 from data_portal_archiver.utils import get_md5
 
@@ -79,13 +79,15 @@ class IaUploader:
             try:
                 _ = await loop.run_in_executor(self.pool, func_upload)
                 logging.info(f"Uploaded {ia_id} to ia")
-            except HTTPError as e:
+            # TODO: retry on error
+            except RequestException as e:
                 logging.error(
                     f"Error {e} with file: "
                     f"{extra_md['package_name']}, {extra_md['resource_name']}"
                 )
                 p_file.unlink()
                 return
+
             except FileNotFoundError as e:
                 logging.error(
                     f"Error {e} with file: "
