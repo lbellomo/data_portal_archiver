@@ -18,7 +18,7 @@ default_maxsize = 5
 default_save_package_metadata = True
 default_upload_resources = True
 default_save_internal_metadata = True
-default_download_only_new_data = True
+default_download_only_new_data = False
 
 
 async def main(section_name):
