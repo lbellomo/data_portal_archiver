@@ -1,0 +1,26 @@
+[global]
+
+# if true, save the pacakge metadata localy
+# save_package_metadata = true
+
+# if true, upload resources to Internet Archive (ia api key is needed for this)
+# upload_resources = true
+
+# if true, update `internal_metadata.json` with the new downloaded data
+# save_internal_metadata = true
+
+# if true, only download dataset that are not in `internal_metadata.json`
+# download_only_new_data = false
+
+# number of workers for earch queue
+# all the queue use the same number
+# the total number of workers are `count_workers` * 5
+# count_workers = 5
+
+# number of max item in each queue
+# maxsize = 5
+
+[section]
+[section.example_section_name]
+base_url = "https://example.portal.gob/"
+portal_name = "example_portal"
